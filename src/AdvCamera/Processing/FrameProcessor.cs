@@ -1,4 +1,4 @@
-using OpenCvSharp;
+﻿using OpenCvSharp;
 
 namespace AdvCamera.Processing;
 
@@ -12,7 +12,7 @@ public sealed record ProcessingParams(
 }
 
 /// <summary>
-/// Applies orientation and image adjustments to camera frames (BGR, 8-bit).
+/// Applies orientation and image adjustments to camera frames (BGRA, 8-bit).
 /// Reuses its internal buffers between frames; not thread-safe (one per capture thread).
 /// </summary>
 public sealed class FrameProcessor : IDisposable
@@ -27,7 +27,7 @@ public sealed class FrameProcessor : IDisposable
     private readonly Mat _saturated = new();
     private readonly Mat _blurred = new();
     private readonly Mat _sharpened = new();
-    private readonly Mat _lut = new(1, 256, MatType.CV_8UC3);
+    private readonly Mat _lut = new(1, 256, MatType.CV_8UC4);
 
     private (double, double, double, double, double, bool)? _lutKey;
     private bool _lutIsIdentity = true;
@@ -57,10 +57,10 @@ public sealed class FrameProcessor : IDisposable
         {
             double alpha = 1.0 - Math.Clamp(p.Denoise, 0, 95) / 100.0;
             if (_accumulator.Empty() || _accumulator.Width != cur.Width || _accumulator.Height != cur.Height)
-                cur.ConvertTo(_accumulator, MatType.CV_32FC3);
+                cur.ConvertTo(_accumulator, MatType.CV_32FC4);
             else
                 Cv2.AccumulateWeighted(cur, _accumulator, alpha, null!);
-            _accumulator.ConvertTo(_denoised, MatType.CV_8UC3);
+            _accumulator.ConvertTo(_denoised, MatType.CV_8UC4);
             cur = _denoised;
         }
         else if (!_accumulator.Empty())
@@ -79,8 +79,8 @@ public sealed class FrameProcessor : IDisposable
         // 4. Saturation / grayscale.
         if (p.Grayscale || Math.Abs(p.Saturation - 100) > 0.5)
         {
-            Cv2.CvtColor(cur, _gray, ColorConversionCodes.BGR2GRAY);
-            Cv2.CvtColor(_gray, _gray3, ColorConversionCodes.GRAY2BGR);
+            Cv2.CvtColor(cur, _gray, ColorConversionCodes.BGRA2GRAY);
+            Cv2.CvtColor(_gray, _gray3, ColorConversionCodes.GRAY2BGRA);
             if (p.Grayscale)
             {
                 cur = _gray3;
@@ -125,7 +125,7 @@ public sealed class FrameProcessor : IDisposable
             1 + p.Temperature * 0.004,
         ];
 
-        var table = new Vec3b[256];
+        var table = new Vec4b[256];
         bool identity = true;
         Span<byte> v = stackalloc byte[3];
         for (int i = 0; i < 256; i++)
@@ -139,7 +139,7 @@ public sealed class FrameProcessor : IDisposable
                 v[ch] = (byte)Math.Clamp(Math.Round(x * 255), 0, 255);
                 if (v[ch] != i) identity = false;
             }
-            table[i] = new Vec3b(v[0], v[1], v[2]);
+            table[i] = new Vec4b(v[0], v[1], v[2], 255);
         }
 
         _lut.SetArray(table);

@@ -6,7 +6,11 @@ Pick the camera from the list at the top right of the window. If you plug a came
 running, click the refresh button next to the list.
 
 If you see **"Could not open the camera"**, another program (the Windows Camera app, Teams, a browser tab, a
-second copy of AdvCamera…) is probably using it. Close that program and select the camera again.
+second copy of AdvCamera…) is probably using it. Close that program and click the refresh button.
+
+If the camera is unplugged or restarts, AdvCamera shows a message; plug it back in and click the refresh button.
+
+If Windows blocks camera access, turn on **Settings → Privacy → Camera → Let desktop apps access your camera**.
 
 AdvCamera remembers the last camera, resolution and all adjustments the next time it starts.
 
@@ -48,9 +52,10 @@ screen; they are not included in snapshots or videos. The crosshair always marks
 
 ### Camera
 
-- **Resolution / format** lists every mode the camera offers. **MJPG** modes usually give the highest frame rate
-  at high resolutions; **YUY2** is uncompressed but often slower. *Camera default* lets the driver decide.
-  The line below the list shows what the camera actually delivers.
+- **Resolution / format** lists every resolution and frame rate the camera offers. The first time you use a
+  camera, AdvCamera picks the highest resolution that runs at 25 fps or more. Modes marked **(YUY2)** are
+  uncompressed: over USB 2.0 they are usually slower at high resolutions, so prefer the unmarked ones.
+  *Camera default* lets the driver decide. The line below the list shows what the camera actually delivers.
 - **Driver settings…** opens the camera manufacturer's settings dialog.
 - **Hardware controls** are settings the camera applies itself (exposure, focus, gain, white balance, …).
   Which controls appear, and their ranges, depends on the camera. Tick **Auto** to let the camera adjust a

@@ -8,7 +8,8 @@ A camera viewer for Windows, similar to the built-in Camera app but with the con
 **USB microscopes**, document cameras and inspection setups: mirroring, rotation, live image adjustments,
 camera hardware controls, zoom, crosshair/grid overlays, snapshots and video recording.
 
-Built with .NET 10 and WPF. Camera capture and image processing use [OpenCvSharp](https://github.com/shimat/opencvsharp).
+Built with .NET 10 and WPF. Video is captured through Windows Media Foundation (the same camera stack as
+the Windows Camera app); image processing and recording use [OpenCvSharp](https://github.com/shimat/opencvsharp).
 
 <!-- Add a screenshot here once you have one, e.g.: ![AdvCamera](docs/images/screenshot.png) -->
 
@@ -19,7 +20,8 @@ Built with .NET 10 and WPF. Camera capture and image processing use [OpenCvSharp
   sharpness, color temperature, tint, noise reduction (frame averaging), grayscale, invert
 - **Camera hardware controls**: exposure, focus, gain, white balance, zoom and others, with *Auto* toggles
   where supported, plus the driver's own settings dialog
-- **Resolution / format picker**: lists every resolution, pixel format (MJPG, YUY2, …) and frame rate the camera offers
+- **Resolution picker**: every resolution and frame rate the camera offers, including 4K at 30 fps on
+  cameras that support it
 - **Zoom and pan**: mouse wheel to zoom (up to 40×), drag to pan, double-click to fit; pixels stay sharp at high zoom
 - **Overlays**: crosshair and grid in several colors
 - **Snapshots** (PNG or JPEG), **copy to clipboard**, **video recording** (Motion-JPEG `.avi`)
@@ -88,8 +90,8 @@ To build the installer as well, install [Inno Setup 6](https://jrsoftware.org/is
 src/AdvCamera/
   App.xaml, MainWindow.xaml(.cs)   UI: toolbar, live view, side panel, status bar
   AppSettings.cs                   All user settings (saved to %APPDATA%\AdvCamera\settings.json)
-  Camera/CaptureEngine.cs          Background capture thread (OpenCV, DirectShow backend), recording
-  Camera/DsCamera.cs               DirectShow: camera list, formats, hardware controls, driver dialog
+  Camera/CaptureEngine.cs          Capture through Media Foundation (camera list, formats, frames), recording
+  Camera/DsCamera.cs               DirectShow: hardware controls and driver dialog only (never streams)
   Camera/DirectShowInterop.cs      COM interface definitions
   Processing/FrameProcessor.cs     Rotation, mirroring and image adjustments per frame
   Controls/LabeledSlider.xaml      Slider with label, value and reset button
