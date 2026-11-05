@@ -99,7 +99,8 @@ public sealed class AppSettings : INotifyPropertyChanged
     public string? DevicePath { get; set; }
     public int FormatWidth { get; set; }
     public int FormatHeight { get; set; }
-    public string? FormatFourcc { get; set; }
+    /// <summary>Pixel format of the chosen mode (e.g. NV12). Null = never chosen, "" = camera default.</summary>
+    public string? FormatSubtype { get; set; }
 
     public ProcessingParams ToParams() => new(
         RotationIndex, FlipH, FlipV,

@@ -40,6 +40,8 @@ public partial class MainWindow : Window
     private CameraDevice? _currentDevice;
     private bool _suppressSelectionEvents;
     private int _openGeneration;
+    private bool _cameraFailed;
+    private readonly SemaphoreSlim _cameraLock = new(1, 1);
 
     private WriteableBitmap? _bitmap;
     private long _lastFrameId;
@@ -83,9 +85,7 @@ public partial class MainWindow : Window
 
         HardwareList.ItemsSource = _hardwareControls;
 
-        _engine.Opened += info => Dispatcher.BeginInvoke(() => OnCameraOpened(info));
         _engine.Failed += msg => Dispatcher.BeginInvoke(() => OnCameraFailed(msg));
-        _engine.Stopped += () => Dispatcher.BeginInvoke(OnCameraStopped);
         _engine.RecordingFailed += msg => Dispatcher.BeginInvoke(() => { SetRecordingUi(false); ShowStatus(msg); });
 
         _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
@@ -111,11 +111,11 @@ public partial class MainWindow : Window
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 
-    private void Window_Loaded(object sender, RoutedEventArgs e)
+    private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
         CompositionTarget.Rendering += OnRendering;
         _statusTimer.Start();
-        RefreshCameraList(selectSaved: true);
+        await RefreshCameraListAsync(selectSaved: true);
     }
 
     private void Window_Closing(object? sender, CancelEventArgs e)
@@ -205,12 +205,12 @@ public partial class MainWindow : Window
     // Camera selection
     // =====================================================================
 
-    private void RefreshCameraList(bool selectSaved)
+    private async Task RefreshCameraListAsync(bool selectSaved)
     {
         List<CameraDevice> devices;
         try
         {
-            devices = DsCamera.EnumerateDevices();
+            devices = await CaptureEngine.ListDevicesAsync();
         }
         catch (Exception ex)
         {
@@ -218,52 +218,65 @@ public partial class MainWindow : Window
             ShowStatus("Could not list cameras: " + ex.Message);
         }
 
-        string? wanted = selectSaved ? _settings.DevicePath : _currentDevice?.DevicePath;
+        string wantedKey = CameraDevice.Key(selectSaved ? _settings.DevicePath : _currentDevice?.DevicePath);
 
         _suppressSelectionEvents = true;
         CameraCombo.ItemsSource = devices;
-        var match = devices.FirstOrDefault(d => d.DevicePath == wanted) ?? devices.FirstOrDefault();
+        var match = devices.FirstOrDefault(d => CameraDevice.Key(d.DevicePath) == wantedKey) ?? devices.FirstOrDefault();
         CameraCombo.SelectedItem = match;
         _suppressSelectionEvents = false;
 
         if (match == null)
         {
-            _ = CloseCameraAsync();
+            await CloseCameraAsync();
             CenterMessage.Text = "No camera found.\nConnect a camera and click the refresh button next to the camera list.";
             CenterMessage.Visibility = Visibility.Visible;
             return;
         }
 
         // Re-open only if the device actually changed (or nothing is open yet).
-        if (_currentDevice == null || match.DevicePath != _currentDevice.DevicePath || match.Index != _currentDevice.Index)
-            _ = OpenDeviceAsync(match);
+        if (_currentDevice == null || match.DevicePath != _currentDevice.DevicePath)
+            await OpenDeviceAsync(match);
     }
 
-    private void RefreshCameras_Click(object sender, RoutedEventArgs e) => RefreshCameraList(selectSaved: false);
+    private async void RefreshCameras_Click(object sender, RoutedEventArgs e)
+    {
+        // If the camera failed (e.g. it was unplugged and reconnected), re-open it.
+        if (_cameraFailed) _currentDevice = null;
+        await RefreshCameraListAsync(selectSaved: false);
+    }
 
-    private void CameraCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void CameraCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressSelectionEvents) return;
         if (CameraCombo.SelectedItem is CameraDevice device)
-            _ = OpenDeviceAsync(device);
+            await OpenDeviceAsync(device);
     }
 
-    private void FormatCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private async void FormatCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressSelectionEvents || _currentDevice == null) return;
         if (FormatCombo.SelectedItem is not CameraFormat format) return;
 
         _settings.FormatWidth = format.Width;
         _settings.FormatHeight = format.Height;
-        _settings.FormatFourcc = format.Fourcc;
-        _ = StartCaptureAsync(_currentDevice, format);
+        _settings.FormatSubtype = format.Subtype;
+        await StartCaptureAsync(format, ++_openGeneration);
     }
 
     private async Task CloseCameraAsync()
     {
         _openGeneration++;
         StopRecordingIfActive();
-        await _engine.StopAsync();
+        await _cameraLock.WaitAsync();
+        try
+        {
+            await _engine.CloseAsync();
+        }
+        finally
+        {
+            _cameraLock.Release();
+        }
         _dsCamera?.Dispose();
         _dsCamera = null;
         _currentDevice = null;
@@ -277,42 +290,63 @@ public partial class MainWindow : Window
         StopRecordingIfActive();
         CenterMessage.Text = $"Opening {device.Name}…";
         CenterMessage.Visibility = Visibility.Visible;
-
-        await _engine.StopAsync();
-        if (generation != _openGeneration) return;
-
-        _dsCamera?.Dispose();
-        _dsCamera = DsCamera.Open(device);
+        ActualFormatText.Text = "";
         _currentDevice = device;
+        _cameraFailed = false;
         Title = $"AdvCamera — {device.Name}";
 
-        bool sameAsSaved = device.DevicePath == _settings.DevicePath;
+        bool sameAsSaved = CameraDevice.Key(device.DevicePath) == CameraDevice.Key(_settings.DevicePath);
         _settings.DevicePath = device.DevicePath;
+
+        List<CameraFormat> available;
+        await _cameraLock.WaitAsync();
+        try
+        {
+            if (generation != _openGeneration) return;
+            available = await _engine.OpenAsync(device);
+        }
+        catch (Exception ex)
+        {
+            OnCameraFailed(ex.Message);
+            return;
+        }
+        finally
+        {
+            _cameraLock.Release();
+        }
+        if (generation != _openGeneration) return;
 
         // Formats
         var formats = new List<CameraFormat> { CameraFormat.Default };
-        try { formats.AddRange(_dsCamera?.GetFormats() ?? []); } catch { /* ignore */ }
+        formats.AddRange(available);
 
-        CameraFormat selected = CameraFormat.Default;
+        CameraFormat? selected = null;
         if (sameAsSaved && _settings.FormatWidth > 0)
         {
-            selected = formats.FirstOrDefault(f => f.Width == _settings.FormatWidth && f.Height == _settings.FormatHeight && f.Fourcc == _settings.FormatFourcc)
-                       ?? formats.FirstOrDefault(f => f.Width == _settings.FormatWidth && f.Height == _settings.FormatHeight)
-                       ?? CameraFormat.Default;
+            selected = formats.FirstOrDefault(f => f.Width == _settings.FormatWidth && f.Height == _settings.FormatHeight && f.Subtype == _settings.FormatSubtype)
+                       ?? formats.FirstOrDefault(f => f.Width == _settings.FormatWidth && f.Height == _settings.FormatHeight);
         }
-        else
+        else if (sameAsSaved && _settings.FormatWidth == 0 && _settings.FormatSubtype == "")
         {
-            _settings.FormatWidth = 0;
-            _settings.FormatHeight = 0;
-            _settings.FormatFourcc = null;
+            selected = CameraFormat.Default; // user explicitly chose "Camera default"
         }
+        // First time with this camera: highest resolution that still runs smoothly.
+        selected ??= available.FirstOrDefault(f => f.Subtype == "NV12" && f.Fps >= 25)
+                     ?? available.FirstOrDefault(f => f.Fps >= 25)
+                     ?? CameraFormat.Default;
+
+        _settings.FormatWidth = selected.Width;
+        _settings.FormatHeight = selected.Height;
+        _settings.FormatSubtype = selected.Subtype;
 
         _suppressSelectionEvents = true;
         FormatCombo.ItemsSource = formats;
         FormatCombo.SelectedItem = selected;
         _suppressSelectionEvents = false;
 
-        // Hardware controls
+        // Hardware controls (through DirectShow; it never streams, so it doesn't disturb capture)
+        _dsCamera?.Dispose();
+        _dsCamera = DsCamera.Open(device);
         _hardwareControls.Clear();
         try
         {
@@ -323,41 +357,46 @@ public partial class MainWindow : Window
         NoHardwareText.Visibility = _hardwareControls.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         HardwareDefaultsButton.Visibility = _hardwareControls.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
 
-        await StartCaptureAsync(device, selected, generation);
+        await StartCaptureAsync(selected, generation);
     }
 
-    private async Task StartCaptureAsync(CameraDevice device, CameraFormat format, int? generation = null)
+    private async Task StartCaptureAsync(CameraFormat format, int generation)
     {
-        int gen = generation ?? ++_openGeneration;
         StopRecordingIfActive();
-        await _engine.StopAsync();
-        if (gen != _openGeneration) return;
-
-        CenterMessage.Text = $"Opening {device.Name}…";
+        CenterMessage.Text = $"Starting {_currentDevice?.Name}…";
         CenterMessage.Visibility = _bitmap == null ? Visibility.Visible : Visibility.Collapsed;
         ActualFormatText.Text = "";
-        _engine.Start(device.Index, format.Width > 0 ? format : null);
-    }
 
-    private void OnCameraOpened(CaptureInfo info)
-    {
+        CaptureInfo info;
+        await _cameraLock.WaitAsync();
+        try
+        {
+            if (generation != _openGeneration) return;
+            info = await _engine.StartAsync(format.Width > 0 ? format : null);
+        }
+        catch (Exception ex)
+        {
+            OnCameraFailed(ex.Message);
+            return;
+        }
+        finally
+        {
+            _cameraLock.Release();
+        }
+
         string fps = info.Fps > 0 ? $" @ {info.Fps:0.#} fps" : "";
-        string fourcc = string.IsNullOrEmpty(info.Fourcc) ? "" : $" {info.Fourcc}";
-        ActualFormatText.Text = $"Camera delivers {info.Width} × {info.Height}{fourcc}{fps}";
+        ActualFormatText.Text = $"Camera delivers {info.Width} × {info.Height} {info.Subtype}{fps}";
         CenterMessage.Visibility = Visibility.Collapsed;
-        ShowStatus($"{_currentDevice?.Name}: {info.Width} × {info.Height}{fourcc}");
+        ShowStatus($"{_currentDevice?.Name}: {info.Width} × {info.Height}{fps}");
     }
 
     private void OnCameraFailed(string message)
     {
-        CenterMessage.Text = message;
-        CenterMessage.Visibility = Visibility.Visible;
-        ShowStatus(message);
-    }
-
-    private void OnCameraStopped()
-    {
+        _cameraFailed = true;
         if (_recording) SetRecordingUi(false);
+        CenterMessage.Text = message + "\n\nClick the refresh button next to the camera list to try again.";
+        CenterMessage.Visibility = Visibility.Visible;
+        ShowStatus(message.Split('\n')[0]);
     }
 
     private void DriverSettings_Click(object sender, RoutedEventArgs e)
@@ -394,7 +433,7 @@ public partial class MainWindow : Window
         int w = frame.Width, h = frame.Height;
         if (_bitmap == null || _bitmap.PixelWidth != w || _bitmap.PixelHeight != h)
         {
-            _bitmap = new WriteableBitmap(w, h, 96, 96, PixelFormats.Bgr24, null);
+            _bitmap = new WriteableBitmap(w, h, 96, 96, PixelFormats.Bgr32, null);
             Preview.Source = _bitmap;
             OutputSizeText.Text = $"{w} × {h}";
             UpdateScalingMode();

@@ -3,20 +3,35 @@ using System.Runtime.InteropServices.ComTypes;
 
 namespace AdvCamera.Camera;
 
-/// <summary>A video capture device. <see cref="Index"/> matches OpenCV's DirectShow index.</summary>
+/// <summary>A video capture device. <see cref="DevicePath"/> is the Windows device id.</summary>
 public sealed record CameraDevice(int Index, string Name, string DevicePath)
 {
     public override string ToString() => Name;
+
+    /// <summary>
+    /// The part of a device path that identifies the physical device, the same for Media Foundation
+    /// and DirectShow paths, e.g. <c>\\?\usb#vid_1d6b&amp;pid_0102&amp;mi_02#6&amp;13142298&amp;1&amp;0002</c>.
+    /// </summary>
+    public static string Key(string? devicePath)
+    {
+        if (string.IsNullOrEmpty(devicePath)) return "";
+        string p = devicePath.ToLowerInvariant();
+        int i = p.IndexOf("#{", StringComparison.Ordinal);
+        return i > 0 ? p[..i] : p;
+    }
 }
 
 /// <summary>A resolution / pixel format the camera offers. Width 0 means "camera default".</summary>
-public sealed record CameraFormat(int Width, int Height, string Fourcc, double Fps, bool IsFourcc)
+public sealed record CameraFormat(int Width, int Height, string Subtype, double Fps, object? Native = null)
 {
-    public static readonly CameraFormat Default = new(0, 0, "", 0, false);
+    public static readonly CameraFormat Default = new(0, 0, "", 0);
 
-    public override string ToString() => Width == 0
-        ? "Camera default"
-        : $"{Width} × {Height}   {Fourcc}   {Fps:0.#} fps";
+    public override string ToString()
+    {
+        if (Width == 0) return "Camera default";
+        string text = $"{Width} × {Height}  @ {Fps:0.#} fps";
+        return Subtype == "NV12" ? text : $"{text}  ({Subtype})";
+    }
 }
 
 /// <summary>A UVC control (brightness, exposure, focus, …) exposed by the camera driver.</summary>
@@ -78,9 +93,9 @@ public sealed class HardwareControl
 }
 
 /// <summary>
-/// A DirectShow handle to a camera, used for enumerating formats, reading/writing
-/// hardware controls and showing the driver settings dialog. Frames are grabbed
-/// separately by OpenCV (see <see cref="CaptureEngine"/>).
+/// A DirectShow handle to a camera, used only for its hardware controls (exposure, focus, …)
+/// and the driver settings dialog. Video itself is captured through Media Foundation
+/// (see <see cref="CaptureEngine"/>); this handle never streams.
 /// </summary>
 public sealed class DsCamera : IDisposable
 {
@@ -88,36 +103,19 @@ public sealed class DsCamera : IDisposable
 
     private DsCamera(object filter) => _filter = filter;
 
-    // ---------- Enumeration ----------
-
-    public static List<CameraDevice> EnumerateDevices()
-    {
-        var result = new List<CameraDevice>();
-        var monikers = GetMonikers();
-        try
-        {
-            for (int i = 0; i < monikers.Count; i++)
-            {
-                string name = ReadProperty(monikers[i], "FriendlyName") ?? $"Camera {i + 1}";
-                string path = ReadProperty(monikers[i], "DevicePath") ?? name;
-                result.Add(new CameraDevice(i, name, path));
-            }
-        }
-        finally
-        {
-            monikers.ForEach(m => Marshal.ReleaseComObject(m));
-        }
-        return result;
-    }
-
+    /// <summary>Opens the DirectShow device that matches the given (Media Foundation) device.</summary>
     public static DsCamera? Open(CameraDevice device)
     {
         var monikers = GetMonikers();
         try
         {
-            if (device.Index >= monikers.Count) return null;
+            string key = CameraDevice.Key(device.DevicePath);
+            var match = monikers.FirstOrDefault(m => CameraDevice.Key(ReadProperty(m, "DevicePath")) == key)
+                        ?? monikers.FirstOrDefault(m => ReadProperty(m, "FriendlyName") == device.Name);
+            if (match == null) return null;
+
             var iid = typeof(IBaseFilter).GUID;
-            monikers[device.Index].BindToObject(null!, null, ref iid, out object filter);
+            match.BindToObject(null!, null, ref iid, out object filter);
             return new DsCamera(filter);
         }
         catch
@@ -172,146 +170,6 @@ public sealed class DsCamera : IDisposable
         {
             return null;
         }
-    }
-
-    // ---------- Formats ----------
-
-    public List<CameraFormat> GetFormats()
-    {
-        var formats = new Dictionary<(int, int, string), CameraFormat>();
-        var config = FindStreamConfig();
-        if (config == null) return [];
-
-        try
-        {
-            if (config.GetNumberOfCapabilities(out int count, out int size) != 0) return [];
-            IntPtr caps = Marshal.AllocCoTaskMem(Math.Max(size, 512));
-            try
-            {
-                for (int i = 0; i < count; i++)
-                {
-                    if (config.GetStreamCaps(i, out IntPtr pmt, caps) != 0 || pmt == IntPtr.Zero) continue;
-                    try
-                    {
-                        var mt = Marshal.PtrToStructure<AMMediaType>(pmt);
-                        if (mt.majortype != DsGuids.MEDIATYPE_Video || mt.pbFormat == IntPtr.Zero) continue;
-
-                        long avgTime; int w, h;
-                        if (mt.formattype == DsGuids.FORMAT_VideoInfo && mt.cbFormat >= 88)
-                        {
-                            avgTime = Marshal.ReadInt64(mt.pbFormat, 40);
-                            w = Marshal.ReadInt32(mt.pbFormat, 52);
-                            h = Marshal.ReadInt32(mt.pbFormat, 56);
-                        }
-                        else if (mt.formattype == DsGuids.FORMAT_VideoInfo2 && mt.cbFormat >= 112)
-                        {
-                            avgTime = Marshal.ReadInt64(mt.pbFormat, 40);
-                            w = Marshal.ReadInt32(mt.pbFormat, 76);
-                            h = Marshal.ReadInt32(mt.pbFormat, 80);
-                        }
-                        else continue;
-
-                        h = Math.Abs(h);
-                        if (w <= 0 || h <= 0) continue;
-                        double fps = avgTime > 0 ? Math.Round(1e7 / avgTime, 1) : 0;
-                        var (fourcc, isFourcc) = SubtypeName(mt.subtype);
-                        var key = (w, h, fourcc);
-                        if (!formats.TryGetValue(key, out var existing) || existing.Fps < fps)
-                            formats[key] = new CameraFormat(w, h, fourcc, fps, isFourcc);
-                    }
-                    finally
-                    {
-                        NativeMethods.FreeMediaType(pmt);
-                    }
-                }
-            }
-            finally
-            {
-                Marshal.FreeCoTaskMem(caps);
-            }
-        }
-        finally
-        {
-            Marshal.ReleaseComObject(config);
-        }
-
-        return formats.Values
-            .OrderByDescending(f => f.Width * f.Height)
-            .ThenBy(f => f.Fourcc == "MJPG" ? 0 : 1)
-            .ThenBy(f => f.Fourcc)
-            .ToList();
-    }
-
-    private IAMStreamConfig? FindStreamConfig()
-    {
-        if (_filter is not IBaseFilter filter || filter.EnumPins(out var enumPins) != 0 || enumPins == null)
-            return null;
-
-        IAMStreamConfig? fallback = null;
-        try
-        {
-            var one = new IPin[1];
-            while (enumPins.Next(1, one, IntPtr.Zero) == 0 && one[0] != null)
-            {
-                var pin = one[0];
-                if (pin.QueryDirection(out int dir) == 0 && dir == 1 && pin is IAMStreamConfig config)
-                {
-                    if (GetPinCategory(pin) == DsGuids.PIN_CATEGORY_CAPTURE)
-                    {
-                        if (fallback != null) Marshal.ReleaseComObject(fallback);
-                        return config;
-                    }
-                    if (fallback == null)
-                    {
-                        fallback = config;
-                        continue;
-                    }
-                }
-                Marshal.ReleaseComObject(pin);
-            }
-        }
-        finally
-        {
-            Marshal.ReleaseComObject(enumPins);
-        }
-        return fallback;
-    }
-
-    private static Guid GetPinCategory(IPin pin)
-    {
-        if (pin is not IKsPropertySet ks) return Guid.Empty;
-        var set = DsGuids.AMPROPSETID_Pin;
-        IntPtr buffer = Marshal.AllocCoTaskMem(16);
-        try
-        {
-            if (ks.Get(ref set, 0, IntPtr.Zero, 0, buffer, 16, out int returned) == 0 && returned == 16)
-                return Marshal.PtrToStructure<Guid>(buffer);
-        }
-        catch
-        {
-            // ignore
-        }
-        finally
-        {
-            Marshal.FreeCoTaskMem(buffer);
-        }
-        return Guid.Empty;
-    }
-
-    private static (string Name, bool IsFourcc) SubtypeName(Guid subtype)
-    {
-        if (subtype.ToString().EndsWith("-0000-0010-8000-00aa00389b71", StringComparison.OrdinalIgnoreCase))
-        {
-            var b = subtype.ToByteArray();
-            var chars = b.Take(4).Select(x => x >= 32 && x < 127 ? (char)x : '?').ToArray();
-            return (new string(chars).Trim(), true);
-        }
-        if (subtype == DsGuids.MEDIASUBTYPE_RGB24) return ("RGB24", false);
-        if (subtype == DsGuids.MEDIASUBTYPE_RGB32) return ("RGB32", false);
-        if (subtype == DsGuids.MEDIASUBTYPE_ARGB32) return ("ARGB32", false);
-        if (subtype == DsGuids.MEDIASUBTYPE_RGB555) return ("RGB555", false);
-        if (subtype == DsGuids.MEDIASUBTYPE_RGB565) return ("RGB565", false);
-        return ("Other", false);
     }
 
     // ---------- Hardware controls ----------
