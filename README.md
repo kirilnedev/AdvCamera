@@ -28,8 +28,17 @@ Built with .NET 10 and WPF. Camera capture and image processing use [OpenCvSharp
 
 ## Download
 
-Get the latest `AdvCamera-win-x64.zip` from the [Releases](https://github.com/kirilnedev/AdvCamera/releases/latest) page, unzip it anywhere and run
-`AdvCamera.exe`. Nothing needs to be installed: the release includes the .NET runtime.
+From the [latest release](https://github.com/kirilnedev/AdvCamera/releases/latest), download either:
+
+- **`AdvCamera-<version>-setup-x64.exe`**: the installer. It adds a Start-menu shortcut and an uninstaller, and
+  installs for your user account without needing administrator rights. Running a newer installer upgrades
+  the existing installation.
+- **`AdvCamera-<version>-win-x64.zip`**: the portable version. Unzip it anywhere and run `AdvCamera.exe`.
+
+Both include the .NET runtime, so nothing else needs to be installed.
+
+Because the downloads aren't code-signed yet, Windows may show *"Windows protected your PC"*. Click
+**More info → Run anyway**.
 
 Requirements: Windows 10 (version 1809 or later) or Windows 11, 64-bit.
 
@@ -64,7 +73,13 @@ dotnet run --project src/AdvCamera
 To build a standalone copy that runs without installing .NET:
 
 ```powershell
-dotnet publish src/AdvCamera -c Release -r win-x64 --self-contained -o publish
+dotnet publish src/AdvCamera -c Release -r win-x64 --self-contained -o publish/AdvCamera
+```
+
+To build the installer as well, install [Inno Setup 6](https://jrsoftware.org/isdl.php) and run:
+
+```powershell
+./installer/build-installer.ps1 -Version 1.0.0     # writes artifacts/AdvCamera-1.0.0-setup-x64.exe
 ```
 
 ## Project layout
@@ -78,6 +93,7 @@ src/AdvCamera/
   Camera/DirectShowInterop.cs      COM interface definitions
   Processing/FrameProcessor.cs     Rotation, mirroring and image adjustments per frame
   Controls/LabeledSlider.xaml      Slider with label, value and reset button
+installer/                         Inno Setup script and build script for the installer
 docs/                              User guide and maintainer notes
 ```
 
