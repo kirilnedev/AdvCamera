@@ -1,0 +1,292 @@
+<Window x:Class="AdvCamera.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:c="clr-namespace:AdvCamera.Controls"
+        Title="AdvCamera"
+        Width="1280" Height="820" MinWidth="720" MinHeight="460"
+        Background="#FF1C1C1C" Foreground="#FFEDEDED"
+        WindowStartupLocation="CenterScreen"
+        Loaded="Window_Loaded" Closing="Window_Closing" PreviewKeyDown="Window_PreviewKeyDown">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- ================= Toolbar ================= -->
+        <Border x:Name="ToolbarHost" Grid.Row="0" Padding="8,6" BorderThickness="0,0,0,1" BorderBrush="{StaticResource SubtleBorder}">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Style="{StaticResource Icon}" Text="&#xE714;" Margin="8,0,6,0" Opacity="0.8" />
+                    <ComboBox x:Name="CameraCombo" MinWidth="200" MaxWidth="300" VerticalAlignment="Center"
+                              SelectionChanged="CameraCombo_SelectionChanged" ToolTip="Camera" />
+                    <Button Style="{StaticResource ToolButton}" Click="RefreshCameras_Click" ToolTip="Refresh camera list">
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xE72C;" />
+                    </Button>
+                    <Rectangle Style="{StaticResource ToolSeparator}" />
+                    <ToggleButton Style="{StaticResource ToolToggle}" IsChecked="{Binding PanelVisible}"
+                                  ToolTip="Show / hide the adjustments panel (P)">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Icon}" Text="&#xE9E9;" />
+                            <TextBlock Style="{StaticResource ToolLabel}" Text="Adjust" />
+                        </StackPanel>
+                    </ToggleButton>
+                </StackPanel>
+
+                <WrapPanel VerticalAlignment="Center">
+                    <Button Style="{StaticResource ToolButton}" Click="RotateLeft_Click" ToolTip="Rotate 90° counter-clockwise (Shift+R)">
+                        <TextBlock Style="{StaticResource SymbolIcon}" Text="&#x21BA;" />
+                    </Button>
+                    <Button Style="{StaticResource ToolButton}" Click="RotateRight_Click" ToolTip="Rotate 90° clockwise (R)">
+                        <TextBlock Style="{StaticResource SymbolIcon}" Text="&#x21BB;" />
+                    </Button>
+                    <ToggleButton Style="{StaticResource ToolToggle}" IsChecked="{Binding FlipH}" ToolTip="Mirror horizontally / flip X (H)">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource SymbolIcon}" Text="&#x21C6;" />
+                            <TextBlock Style="{StaticResource ToolLabel}" Text="Flip X" />
+                        </StackPanel>
+                    </ToggleButton>
+                    <ToggleButton Style="{StaticResource ToolToggle}" IsChecked="{Binding FlipV}" ToolTip="Mirror vertically / flip Y (V)">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource SymbolIcon}" Text="&#x21C5;" />
+                            <TextBlock Style="{StaticResource ToolLabel}" Text="Flip Y" />
+                        </StackPanel>
+                    </ToggleButton>
+
+                    <Rectangle Style="{StaticResource ToolSeparator}" />
+
+                    <Button Style="{StaticResource ToolButton}" Click="Snapshot_Click" ToolTip="Save a snapshot (S or F12)">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Icon}" Text="&#xE722;" />
+                            <TextBlock Style="{StaticResource ToolLabel}" Text="Snapshot" />
+                        </StackPanel>
+                    </Button>
+                    <ToggleButton x:Name="RecordButton" Style="{StaticResource ToolToggle}" Click="Record_Click" ToolTip="Start / stop video recording (Ctrl+R)">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Icon}" Text="&#xE7C8;" Foreground="#FFFF5050" />
+                            <TextBlock x:Name="RecordLabel" Style="{StaticResource ToolLabel}" Text="Record" />
+                        </StackPanel>
+                    </ToggleButton>
+                    <ToggleButton x:Name="FreezeButton" Style="{StaticResource ToolToggle}" Click="Freeze_Click" ToolTip="Freeze / resume the live image (Space)">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Icon}" Text="&#xE769;" />
+                            <TextBlock Style="{StaticResource ToolLabel}" Text="Freeze" />
+                        </StackPanel>
+                    </ToggleButton>
+                    <Button Style="{StaticResource ToolButton}" Click="Copy_Click" ToolTip="Copy image to clipboard (Ctrl+C)">
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xE8C8;" />
+                    </Button>
+
+                    <Rectangle Style="{StaticResource ToolSeparator}" />
+
+                    <ToggleButton Style="{StaticResource ToolToggle}" IsChecked="{Binding Crosshair}" ToolTip="Crosshair (C)">
+                        <TextBlock Style="{StaticResource SymbolIcon}" Text="&#x2316;" />
+                    </ToggleButton>
+                    <ToggleButton Style="{StaticResource ToolToggle}" IsChecked="{Binding Grid}" ToolTip="Grid (G)">
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xE80A;" />
+                    </ToggleButton>
+                    <Button Style="{StaticResource ToolButton}" Click="ZoomFit_Click" ToolTip="Fit to window (0 or double-click image). Mouse wheel zooms, drag pans.">
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xE9A6;" />
+                    </Button>
+                    <Button Style="{StaticResource ToolButton}" Click="Fullscreen_Click" ToolTip="Full screen (F11, Esc to leave)">
+                        <TextBlock Style="{StaticResource Icon}" Text="&#xE740;" />
+                    </Button>
+                </WrapPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- ================= Main area ================= -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MinWidth="240" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition x:Name="PanelColumn" Width="330" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Live image -->
+            <Grid x:Name="Viewport" Background="Black" ClipToBounds="True"
+                  MouseWheel="Viewport_MouseWheel"
+                  MouseLeftButtonDown="Viewport_MouseLeftButtonDown"
+                  MouseLeftButtonUp="Viewport_MouseLeftButtonUp"
+                  MouseMove="Viewport_MouseMove"
+                  SizeChanged="Viewport_SizeChanged">
+                <Grid x:Name="ZoomHost">
+                    <Grid.RenderTransform>
+                        <TransformGroup>
+                            <ScaleTransform x:Name="ZoomScale" />
+                            <TranslateTransform x:Name="ZoomTranslate" />
+                        </TransformGroup>
+                    </Grid.RenderTransform>
+                    <Image x:Name="Preview" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" />
+                </Grid>
+
+                <Canvas x:Name="Overlay" IsHitTestVisible="False" />
+                <Border x:Name="FlashOverlay" Background="White" Opacity="0" IsHitTestVisible="False" />
+
+                <TextBlock x:Name="CenterMessage" HorizontalAlignment="Center" VerticalAlignment="Center"
+                           Foreground="#B0FFFFFF" FontSize="18" TextWrapping="Wrap" TextAlignment="Center"
+                           Margin="40" IsHitTestVisible="False" Text="Starting…" />
+
+                <StackPanel HorizontalAlignment="Left" VerticalAlignment="Top" Margin="12" Orientation="Horizontal" IsHitTestVisible="False">
+                    <Border x:Name="RecBadge" Visibility="Collapsed" Background="#D0B00000" CornerRadius="4" Padding="8,3" Margin="0,0,8,0">
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="10" Height="10" Fill="White" Margin="0,0,6,0" VerticalAlignment="Center" />
+                            <TextBlock x:Name="RecText" Text="REC 00:00" Foreground="White" FontWeight="SemiBold" />
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="FrozenBadge" Visibility="Collapsed" Background="#D00063B1" CornerRadius="4" Padding="8,3">
+                        <TextBlock Text="FROZEN" Foreground="White" FontWeight="SemiBold" />
+                    </Border>
+                </StackPanel>
+
+                <Border x:Name="ZoomBadge" Visibility="Collapsed" HorizontalAlignment="Right" VerticalAlignment="Top"
+                        Margin="12" Background="#A0000000" CornerRadius="4" Padding="8,3" IsHitTestVisible="False">
+                    <TextBlock x:Name="ZoomBadgeText" Foreground="White" />
+                </Border>
+            </Grid>
+
+            <GridSplitter x:Name="PanelSplitter" Grid.Column="1" Width="5" HorizontalAlignment="Stretch"
+                          ResizeBehavior="PreviousAndNext" Background="{StaticResource SubtleBorder}"
+                          DragCompleted="PanelSplitter_DragCompleted" Focusable="False" />
+
+            <!-- ================= Side panel ================= -->
+            <Border x:Name="SidePanel" Grid.Column="2" Background="{StaticResource PanelBackground}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="10,6,14,16">
+
+                        <!-- Orientation -->
+                        <Expander Style="{StaticResource PanelExpander}" Header="Orientation">
+                            <StackPanel>
+                                <TextBlock Text="Rotation" Margin="0,0,0,4" />
+                                <ComboBox SelectedIndex="{Binding RotationIndex}" HorizontalAlignment="Stretch">
+                                    <ComboBoxItem Content="0°" />
+                                    <ComboBoxItem Content="90° clockwise" />
+                                    <ComboBoxItem Content="180°" />
+                                    <ComboBoxItem Content="270° clockwise (90° counter-clockwise)" />
+                                </ComboBox>
+                                <CheckBox Content="Mirror horizontally (flip X)" IsChecked="{Binding FlipH}" Margin="0,10,0,0" />
+                                <CheckBox Content="Mirror vertically (flip Y)" IsChecked="{Binding FlipV}" />
+                                <Button Content="Reset orientation" Click="ResetOrientation_Click" Margin="0,8,0,0" />
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- Software image adjustments -->
+                        <Expander Style="{StaticResource PanelExpander}" Header="Image adjustments">
+                            <StackPanel>
+                                <c:LabeledSlider Title="Brightness" Minimum="-100" Maximum="100" DefaultValue="0" Value="{Binding Brightness}" />
+                                <c:LabeledSlider Title="Contrast" Minimum="-100" Maximum="100" DefaultValue="0" Value="{Binding Contrast}" />
+                                <c:LabeledSlider Title="Gamma" Minimum="0.2" Maximum="3" DefaultValue="1" Step="0.01" LargeStep="0.1" Format="0.00" Value="{Binding Gamma}" />
+                                <c:LabeledSlider Title="Saturation" Minimum="0" Maximum="200" DefaultValue="100" Suffix=" %" Value="{Binding Saturation}" />
+                                <c:LabeledSlider Title="Sharpness" Minimum="0" Maximum="100" DefaultValue="0" Value="{Binding Sharpness}" />
+                                <c:LabeledSlider Title="Temperature (blue ↔ warm)" Minimum="-100" Maximum="100" DefaultValue="0" Value="{Binding Temperature}" />
+                                <c:LabeledSlider Title="Tint (green ↔ magenta)" Minimum="-100" Maximum="100" DefaultValue="0" Value="{Binding Tint}" />
+                                <c:LabeledSlider Title="Noise reduction (frame averaging)" Minimum="0" Maximum="95" DefaultValue="0" Suffix=" %" Value="{Binding Denoise}" />
+                                <CheckBox Content="Grayscale" IsChecked="{Binding Grayscale}" Margin="0,4,0,0" />
+                                <CheckBox Content="Invert (negative)" IsChecked="{Binding Invert}" />
+                                <Button Content="Reset all adjustments" Click="ResetImage_Click" Margin="0,8,0,0" />
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- Overlay -->
+                        <Expander Style="{StaticResource PanelExpander}" Header="Overlay" IsExpanded="False">
+                            <StackPanel>
+                                <CheckBox Content="Crosshair" IsChecked="{Binding Crosshair}" />
+                                <CheckBox Content="Grid" IsChecked="{Binding Grid}" />
+                                <c:LabeledSlider Title="Grid spacing" Minimum="10" Maximum="400" DefaultValue="60" Step="5" Suffix=" px" Value="{Binding GridSpacing}" />
+                                <TextBlock Text="Color" Margin="0,4,0,4" />
+                                <ComboBox x:Name="OverlayColorCombo" HorizontalAlignment="Stretch" />
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- Camera / hardware -->
+                        <Expander Style="{StaticResource PanelExpander}" Header="Camera">
+                            <StackPanel>
+                                <TextBlock Text="Resolution / format" Margin="0,0,0,4" />
+                                <ComboBox x:Name="FormatCombo" HorizontalAlignment="Stretch" SelectionChanged="FormatCombo_SelectionChanged" />
+                                <TextBlock x:Name="ActualFormatText" Style="{StaticResource SectionHint}" Margin="0,4,0,0" />
+                                <Button Content="Driver settings…" Click="DriverSettings_Click" Margin="0,8,0,0"
+                                        ToolTip="Open the camera driver's own settings dialog" />
+
+                                <TextBlock Text="Hardware controls" FontWeight="SemiBold" Margin="0,14,0,2" />
+                                <TextBlock Style="{StaticResource SectionHint}" Margin="0,0,0,6"
+                                           Text="Applied by the camera itself (support depends on the camera)." />
+                                <TextBlock x:Name="NoHardwareText" Style="{StaticResource SectionHint}" Visibility="Collapsed"
+                                           Text="This camera exposes no adjustable controls." />
+                                <ItemsControl x:Name="HardwareList">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Margin="0,2,0,4">
+                                                <DockPanel>
+                                                    <CheckBox DockPanel.Dock="Right" Content="Auto" MinWidth="0" Padding="6,0,0,0"
+                                                              IsChecked="{Binding IsAuto}" Visibility="{Binding AutoVisibility}" Focusable="False" />
+                                                    <TextBlock DockPanel.Dock="Right" Text="{Binding Value}" Margin="0,0,10,0"
+                                                               Opacity="0.75" VerticalAlignment="Center" />
+                                                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+                                                </DockPanel>
+                                                <Slider Minimum="{Binding Min}" Maximum="{Binding Max}" Value="{Binding Value}"
+                                                        SmallChange="{Binding Step}" LargeChange="{Binding LargeStep}"
+                                                        TickFrequency="{Binding Step}" IsSnapToTickEnabled="True"
+                                                        IsMoveToPointEnabled="True" IsEnabled="{Binding IsManual}" Focusable="False" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <Button x:Name="HardwareDefaultsButton" Content="Restore camera defaults" Click="HardwareDefaults_Click" Margin="0,6,0,0" />
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- Capture -->
+                        <Expander Style="{StaticResource PanelExpander}" Header="Snapshots &amp; recording" IsExpanded="False">
+                            <StackPanel>
+                                <TextBlock Text="Save folder" Margin="0,0,0,4" />
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Click="BrowseFolder_Click" Margin="4,0,0,0" ToolTip="Choose folder">
+                                        <TextBlock Style="{StaticResource Icon}" Text="&#xE8B7;" />
+                                    </Button>
+                                    <TextBox Text="{Binding CaptureFolder, UpdateSourceTrigger=LostFocus}" />
+                                </DockPanel>
+                                <TextBlock Text="Snapshot format" Margin="0,8,0,4" />
+                                <ComboBox SelectedIndex="{Binding SnapshotFormatIndex}" HorizontalAlignment="Stretch">
+                                    <ComboBoxItem Content="PNG (lossless)" />
+                                    <ComboBoxItem Content="JPEG (smaller files)" />
+                                </ComboBox>
+                                <TextBlock Style="{StaticResource SectionHint}" Margin="0,6,0,0"
+                                           Text="Videos are saved as Motion-JPEG .avi files. Snapshots and videos include rotation, mirroring and adjustments (not the overlay)." />
+                                <Button Content="Open folder" Click="OpenFolder_Click" Margin="0,8,0,0" />
+                            </StackPanel>
+                        </Expander>
+
+                        <!-- Shortcuts -->
+                        <Expander Style="{StaticResource PanelExpander}" Header="Keyboard shortcuts" IsExpanded="False">
+                            <TextBlock Style="{StaticResource SectionHint}" Opacity="0.85" LineHeight="20">
+                                R / Shift+R — rotate right / left<LineBreak />
+                                H — flip X     V — flip Y<LineBreak />
+                                S or F12 — snapshot<LineBreak />
+                                Ctrl+C — copy image<LineBreak />
+                                Ctrl+R — start / stop recording<LineBreak />
+                                Space — freeze / resume<LineBreak />
+                                C — crosshair     G — grid<LineBreak />
+                                + / − / 0 — zoom in / out / fit<LineBreak />
+                                Mouse wheel — zoom, drag — pan<LineBreak />
+                                P — show / hide this panel<LineBreak />
+                                F11 — full screen (Esc to leave)
+                            </TextBlock>
+                        </Expander>
+                    </StackPanel>
+                </ScrollViewer>
+            </Border>
+        </Grid>
+
+        <!-- ================= Status bar ================= -->
+        <Border x:Name="StatusBarHost" Grid.Row="2" Padding="10,4" BorderThickness="0,1,0,0" BorderBrush="{StaticResource SubtleBorder}">
+            <DockPanel TextElement.FontSize="12">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <TextBlock x:Name="OutputSizeText" Opacity="0.75" Margin="16,0,0,0" />
+                    <TextBlock x:Name="FpsText" Opacity="0.75" Margin="16,0,0,0" MinWidth="60" TextAlignment="Right" />
+                </StackPanel>
+                <TextBlock x:Name="StatusText" Opacity="0.85" TextTrimming="CharacterEllipsis" />
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

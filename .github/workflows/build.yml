@@ -1,0 +1,41 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore AdvCamera.sln
+
+      - name: Build
+        run: dotnet build AdvCamera.sln -c Release --no-restore -warnaserror
+
+      - name: Publish (self-contained, win-x64)
+        run: dotnet publish src/AdvCamera/AdvCamera.csproj -c Release -r win-x64 --self-contained -o publish
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: AdvCamera-win-x64
+          path: publish/
+          retention-days: 14
