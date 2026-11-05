@@ -38,14 +38,14 @@ jobs:
         run: ./installer/build-installer.ps1 -Version "0.0.0-ci.${{ github.run_number }}"
 
       - name: Upload app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: AdvCamera-win-x64
           path: publish/AdvCamera/
           retention-days: 14
 
       - name: Upload installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: AdvCamera-setup
           path: artifacts/*.exe
