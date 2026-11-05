@@ -31,11 +31,22 @@ jobs:
         run: dotnet build AdvCamera.sln -c Release --no-restore -warnaserror
 
       - name: Publish (self-contained, win-x64)
-        run: dotnet publish src/AdvCamera/AdvCamera.csproj -c Release -r win-x64 --self-contained -o publish
+        run: dotnet publish src/AdvCamera/AdvCamera.csproj -c Release -r win-x64 --self-contained -o publish/AdvCamera
 
-      - name: Upload build
+      - name: Build installer
+        shell: pwsh
+        run: ./installer/build-installer.ps1 -Version "0.0.0-ci.${{ github.run_number }}"
+
+      - name: Upload app
         uses: actions/upload-artifact@v4
         with:
           name: AdvCamera-win-x64
-          path: publish/
+          path: publish/AdvCamera/
+          retention-days: 14
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: AdvCamera-setup
+          path: artifacts/*.exe
           retention-days: 14

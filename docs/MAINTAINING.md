@@ -6,8 +6,12 @@ Two GitHub Actions workflows live in `.github/workflows/`:
 
 | Workflow | Runs when | What it does |
 | --- | --- | --- |
-| `build.yml` (job **build**) | Every pull request to `main`, every push to `main` | Builds in Release mode (warnings are errors) and publishes a self-contained build, downloadable from the run's **Artifacts** section for 14 days |
-| `release.yml` | A tag like `v1.2.0` is pushed | Builds with that version number, zips it and creates a GitHub Release with `AdvCamera-win-x64.zip` and auto-generated release notes |
+| `build.yml` (job **build**) | Every pull request to `main`, every push to `main` | Builds in Release mode (warnings are errors), publishes a self-contained build and builds a test installer. Both can be downloaded from the run's **Artifacts** section for 14 days |
+| `release.yml` | A tag like `v1.2.0` is pushed | Builds with that version number and creates a GitHub Release containing the installer (`AdvCamera-1.2.0-setup-x64.exe`), the portable zip (`AdvCamera-1.2.0-win-x64.zip`) and auto-generated release notes |
+
+The installer is made with [Inno Setup](https://jrsoftware.org/isinfo.php) from `installer/AdvCamera.iss`.
+`installer/build-installer.ps1` runs it, and installs Inno Setup through Chocolatey on GitHub's build
+machines. Never change the `AppId` in the `.iss` file: Windows uses it to recognise upgrades.
 
 Dependabot (`.github/dependabot.yml`) opens a pull request once a month when NuGet packages or GitHub Actions
 have updates.
@@ -53,7 +57,16 @@ contributors* so workflows from strangers don't run without your OK.
    git push origin v1.0.0
    ```
 
-3. The **Release** workflow creates the release. Edit its notes on GitHub if you want.
+3. The **Release** workflow (about 5 minutes) creates the release with the installer and the zip.
+   Edit its notes on GitHub if you want.
+
+If a release build fails, fix the problem through a pull request, then delete the tag and push it again:
+
+```powershell
+git push origin :refs/tags/v1.0.0   # delete the tag on GitHub
+git tag -f v1.0.0 origin/main       # move it to the fixed commit
+git push origin v1.0.0
+```
 
 Version numbers follow `MAJOR.MINOR.PATCH`. The tag sets the version shown in the file properties of
 `AdvCamera.exe`.
